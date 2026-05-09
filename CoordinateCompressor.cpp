@@ -1,8 +1,8 @@
-#include "CoordinateCompressor.h"
+#include "CoordinateCompressor.hpp"
 
 using namespace std;
 
-void CoordinateCompressor::add(float val) {
+void CoordinateCompressor::add(double val) {
     values.push_back(val);
 }
 
@@ -11,23 +11,23 @@ void CoordinateCompressor::build() {
     values.erase(unique(values.begin(), values.end()), values.end());
 }
 
-int CoordinateCompressor::get_compressed(float val) const {
+int CoordinateCompressor::get_compressed(double val) const {
     return lower_bound(values.begin(), values.end(), val) - values.begin();
 }
 
-int CoordinateCompressor::get_compressed_less_equal(float val) const {
+int CoordinateCompressor::get_compressed_less_equal(double val) const {
     auto it = upper_bound(values.begin(), values.end(), val);
     if (it == values.begin()) return -1;
-    return (it - values.begin()) - 1;
+    return (int)(it - values.begin()) - 1;
 }
 
-float CoordinateCompressor::get_original(int index) const {
-    if (index >= 0 && index < values.size()) {
+double CoordinateCompressor::get_original(int index) const {
+    if (index >= 0 && index < (int)values.size()) {
         return values[index];
     }
-    return -1.0f; // basic error fallback
+    return -1.0;
 }
 
 int CoordinateCompressor::size() const {
-    return values.size();
+    return (int)values.size();
 }
