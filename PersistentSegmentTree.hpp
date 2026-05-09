@@ -2,21 +2,18 @@
 #define PERSISTENT_SEGMENT_TREE_H
 
 #include <vector>
-#include "CoordinateCompressor.h"
 
 using namespace std;
 
 // Node structure for the Persistent Segment Tree
-struct Node
-{
+struct Node {
     int count;
     int left_child, right_child;
-
+    
     Node() : count(0), left_child(0), right_child(0) {}
 };
 
-class PersistentSegmentTree
-{
+class PersistentSegmentTree {
 private:
     vector<Node> pool;
     vector<int> roots;
@@ -25,7 +22,7 @@ private:
     // Helper functions for tree traversal
     int build(int tl, int tr);
     int insert(int prev_root, int tl, int tr, int val);
-
+    
     // Internal query helpers
     int query_kth(int root_prev, int root_curr, int tl, int tr, int k) const;
     int query_count_less_equal(int root_prev, int root_curr, int tl, int tr, int x, int y) const;
@@ -51,22 +48,6 @@ public:
 
     // The count of numbers <= max_val_compressed in the window window [L, R]
     int query_count_less_equal(int versionL_minus_1, int versionR, int max_val_compressed) const;
-
-    int queryRank(int L, int R, int K) const;
-
-    // queries the k-th smallest return and reverse-maps the rank
-    // back to the original floating-point percentage return.
-    double queryValue(int L, int R, int K, const CoordinateCompressor &cc) const;
-
-    // queries the p-th percentile return in day range [L, R].
-    // p is in [0, 100]: e.g., 50 for median, 5 for VaR.
-    double queryPercentile(int L, int R, double P, const CoordinateCompressor &cc) const;
-
-    // returns the number of versions (including version 0 = empty tree).
-    int getVersionCount() const;
-
-    // returns the number of nodes used in the memory pool.
-    int getPoolUsage() const;
 };
 
 #endif
