@@ -48,6 +48,10 @@ static const vector<MenuItem> MENU_ITEMS = {
     {"Volatility Spread (IQR)","Interquartile range of closes",   3, true },
     {"Drops > 4%  [2005-10]",  "PST count query on pct_change",   4, false},
     {"Market Sentiment",       "% positive vs negative days",     5, true },
+    {"Max Drawdown",           "Peak-to-trough worst loss",       6, true },
+    {"Streak Finder",          "Longest green / red run",         7, true },
+    {"Percentile Rank",        "Where does today rank? (PST)",    8, false},
+    {"Volatility Clustering",  "Volatile-day bar chart (PST)",    9, false},
 };
 
 struct YearRange { string label; int sy, ey; };
@@ -61,13 +65,14 @@ static const vector<YearRange> RANGES = {
 
 enum class State { LOADING, MENU, YEAR_SELECT, RESULT };
 
-static State       g_state   = State::LOADING;
-static int         g_menuSel = 0;
-static int         g_yearSel = 0;
-static int         g_feature = 0;
+static State       g_state      = State::LOADING;
+static int         g_menuSel    = 0;
+static int         g_menuOffset = 0; // first visible menu item (for scrolling)
+static int         g_yearSel    = 0;
+static int         g_feature    = 0;
 static QueryResult g_result;
-static int         g_totalDays = 0;
-static int         g_minYear   = 0, g_maxYear = 0;
+static int         g_totalDays  = 0;
+static int         g_minYear    = 0, g_maxYear = 0;
 
 static void drawBox(int y, int x, int h, int w,
                     const string& title = "", int bcp = CP_BORDER) {
@@ -112,7 +117,7 @@ static void drawStatus(int rows, int cols) {
 
     string hints;
     if (g_state == State::MENU)
-        hints = "  Arrows/1-5: Navigate   Enter: Run Query   Q: Quit";
+        hints = "  Arrows/j/k/1-9: Navigate   Enter: Run Query   Q: Quit";
     else if (g_state == State::YEAR_SELECT)
         hints = "  Arrows/1-5: Choose Range   Enter: Confirm   Esc: Back";
     else if (g_state == State::RESULT)
@@ -132,8 +137,16 @@ static void drawMenu(int rows, int cols) {
     int py = HEADER_H;
     drawBox(py, 0, ph, MENU_W, "ANALYSIS MENU");
 
+    // 2 rows per item (label + hint); 5 overhead rows (borders + quit line)
+    int usable  = ph - 5;
+    int visible = max(1, usable / 2);
+
+    // Keep scroll offset in bounds
+    int total = (int)MENU_ITEMS.size();
+    if (g_menuOffset > total - visible) g_menuOffset = max(0, total - visible);
+
     int iy = py + 2;
-    for (int i = 0; i < (int)MENU_ITEMS.size(); i++) {
+    for (int i = g_menuOffset; i < total && i < g_menuOffset + visible; i++) {
         bool sel = (i == g_menuSel);
         if (sel) {
             attron(COLOR_PAIR(CP_SELECTED) | A_BOLD);
@@ -142,15 +155,30 @@ static void drawMenu(int rows, int cols) {
             attron(COLOR_PAIR(CP_DEFAULT));
         }
         string lbl = "  [" + to_string(i+1) + "] " + MENU_ITEMS[i].label;
+        // Truncate label to fit within the pane
+        if ((int)lbl.size() > MENU_W - 3) lbl = lbl.substr(0, MENU_W - 3);
         mvaddstr(iy, 1, lbl.c_str());
         if (sel) attroff(COLOR_PAIR(CP_SELECTED) | A_BOLD);
         else     attroff(COLOR_PAIR(CP_DEFAULT));
 
         attron(COLOR_PAIR(CP_DIMMED));
-        string hint = "       " + MENU_ITEMS[i].hint;
+        string hint = "      " + MENU_ITEMS[i].hint;
+        if ((int)hint.size() > MENU_W - 3) hint = hint.substr(0, MENU_W - 3);
         mvaddstr(iy + 1, 1, hint.c_str());
         attroff(COLOR_PAIR(CP_DIMMED));
-        iy += 3;
+        iy += 2;
+    }
+
+    // Scroll indicators
+    if (g_menuOffset > 0) {
+        attron(COLOR_PAIR(CP_DIMMED));
+        mvaddstr(py + 1, MENU_W - 6, "(^up)");
+        attroff(COLOR_PAIR(CP_DIMMED));
+    }
+    if (g_menuOffset + visible < total) {
+        attron(COLOR_PAIR(CP_DIMMED));
+        mvaddstr(py + ph - 4, MENU_W - 8, "(vmore)");
+        attroff(COLOR_PAIR(CP_DIMMED));
     }
 
     attron(COLOR_PAIR(CP_RED) | A_BOLD);
@@ -220,16 +248,68 @@ static void drawResult(int rows, int cols) {
         if (label.find("Change") != string::npos ||
             label.find("Return") != string::npos) {
             vcp = (!value.empty() && value[0] == '-') ? CP_RED : CP_GREEN;
-        } else if (label.find("Positive") != string::npos) vcp = CP_GREEN;
-        else if (label.find("Negative") != string::npos)   vcp = CP_RED;
-        else if (label.find("Worst")    != string::npos)   vcp = CP_RED;
-        else if (label.find("IQR")      != string::npos ||
-                 label.find("Method")   != string::npos)   vcp = CP_CYAN;
+        } else if (label.find("Positive")    != string::npos) vcp = CP_GREEN;
+        else if (label.find("Negative")      != string::npos) vcp = CP_RED;
+        else if (label.find("Worst")         != string::npos) vcp = CP_RED;
+        else if (label.find("Max Drawdown")  != string::npos) vcp = CP_RED;
+        else if (label.find("Drawdown")      != string::npos) vcp = CP_RED;
+        else if (label.find("Points Lost")   != string::npos) vcp = CP_RED;
+        else if (label.find("Cumul. Loss")   != string::npos) vcp = CP_RED;
+        else if (label.find("Cumul. Gain")   != string::npos) vcp = CP_GREEN;
+        else if (label.find("Best Green")    != string::npos) vcp = CP_GREEN;
+        else if (label.find("Best Red")      != string::npos) vcp = CP_RED;
+        else if (label.find("Full-Period")   != string::npos) vcp = CP_CYAN;
+        else if (label.find("Rank")          != string::npos) vcp = CP_CYAN;
+        else if (label.find("IQR")           != string::npos ||
+                 label.find("Method")        != string::npos ||
+                 label.find("Algorithm")     != string::npos) vcp = CP_CYAN;
 
         attron(COLOR_PAIR(vcp) | A_BOLD);
         mvaddstr(cy, px + 2 + lw + 1, value.c_str());
         attroff(COLOR_PAIR(vcp) | A_BOLD);
         cy++;
+    }
+
+    // Bar-chart section (Volatility Clustering)
+    if (g_result.is_chart && !g_result.chart_rows.empty()) {
+        cy++;
+        attron(COLOR_PAIR(CP_DIMMED));
+        string sep(min(pw - 6, 44), '-');
+        if (cy < py + ph - 3) mvaddstr(cy++, px + 3, sep.c_str());
+        attroff(COLOR_PAIR(CP_DIMMED));
+
+        int maxCount = 0;
+        for (auto& r : g_result.chart_rows) maxCount = max(maxCount, r.count);
+
+        // barWidth: chars available for the bar itself
+        int barWidth = max(8, pw - 26); // label(4)+space(1)+|(1)+...+|(1)+space(1)+count+pct
+
+        bool truncated = false;
+        for (auto& row : g_result.chart_rows) {
+            if (cy >= py + ph - 3) { truncated = true; break; }
+
+            int barLen = (maxCount > 0) ? (row.count * barWidth / maxCount) : 0;
+
+            ostringstream line;
+            line << row.label << " |";
+            line << string(barLen, '#');
+            // pad to barWidth so all bars are left-aligned
+            for (int s = barLen; s < barWidth; s++) line << ' ';
+            line << "| ";
+            line << right << setw(3) << row.count;
+            line << "  (" << fixed << setprecision(1) << row.pct << "%)";
+
+            int cp = row.highlight ? CP_RED : CP_GREEN;
+            attron(COLOR_PAIR(cp) | (row.highlight ? A_BOLD : 0));
+            mvaddstr(cy++, px + 3, line.str().c_str());
+            attroff(COLOR_PAIR(cp) | A_BOLD);
+        }
+        if (truncated) {
+            attron(COLOR_PAIR(CP_DIMMED));
+            mvaddstr(cy, px + 3, "  ... (expand terminal to see all years)");
+            attroff(COLOR_PAIR(CP_DIMMED));
+            cy++;
+        }
     }
 
     cy++;
@@ -293,11 +373,15 @@ static void fullRedraw() {
 
 static void runQuery(const Analytics& A, int feature, int sy = 0, int ey = 0) {
     switch (feature) {
-        case 1: g_result = A.maxCrash();              break;
-        case 2: g_result = A.maxRally();              break;
-        case 3: g_result = A.volatilityIQR(sy, ey);  break;
-        case 4: g_result = A.drops2005to2010();       break;
-        case 5: g_result = A.sentiment(sy, ey);       break;
+        case 1: g_result = A.maxCrash();                  break;
+        case 2: g_result = A.maxRally();                  break;
+        case 3: g_result = A.volatilityIQR(sy, ey);      break;
+        case 4: g_result = A.drops2005to2010();           break;
+        case 5: g_result = A.sentiment(sy, ey);           break;
+        case 6: g_result = A.maxDrawdown(sy, ey);         break;
+        case 7: g_result = A.streakFinder(sy, ey);        break;
+        case 8: g_result = A.percentileRank();            break;
+        case 9: g_result = A.volatilityClustering();      break;
     }
 }
 
@@ -370,21 +454,41 @@ int main(int argc, char* argv[]) {
         fullRedraw();
         int ch = getch();
 
+        // Helper: after changing g_menuSel, clamp scroll offset so selection is visible.
+        auto syncMenuScroll = [&]() {
+            int rows2, cols2; getmaxyx(stdscr, rows2, cols2);
+            int ph2     = rows2 - HEADER_H - FOOTER_H;
+            int visible = max(1, (ph2 - 5) / 2);
+            int total   = (int)MENU_ITEMS.size();
+            if (g_menuSel < g_menuOffset)
+                g_menuOffset = g_menuSel;
+            if (g_menuSel >= g_menuOffset + visible)
+                g_menuOffset = g_menuSel - visible + 1;
+            if (g_menuOffset < 0) g_menuOffset = 0;
+            if (g_menuOffset > max(0, total - visible))
+                g_menuOffset = max(0, total - visible);
+        };
+
         if (g_state == State::MENU) {
             if (ch == 'q' || ch == 'Q') break;
-            else if (ch == KEY_UP   || ch == 'k')
+            else if (ch == KEY_UP   || ch == 'k') {
                 g_menuSel = (g_menuSel - 1 + (int)MENU_ITEMS.size()) % (int)MENU_ITEMS.size();
-            else if (ch == KEY_DOWN || ch == 'j')
+                syncMenuScroll();
+            }
+            else if (ch == KEY_DOWN || ch == 'j') {
                 g_menuSel = (g_menuSel + 1) % (int)MENU_ITEMS.size();
+                syncMenuScroll();
+            }
             else if (ch == '\n' || ch == KEY_ENTER || ch == '\r') {
                 g_feature = MENU_ITEMS[g_menuSel].feature;
                 if (MENU_ITEMS[g_menuSel].needsYears) { g_yearSel = 0; g_state = State::YEAR_SELECT; }
                 else { runQuery(analytics, g_feature); g_state = State::RESULT; }
             }
-            else if (ch >= '1' && ch <= '5') {
+            else if (ch >= '1' && ch <= '9') {
                 int i = ch - '1';
                 if (i < (int)MENU_ITEMS.size()) {
                     g_menuSel = i;
+                    syncMenuScroll();
                     g_feature = MENU_ITEMS[i].feature;
                     if (MENU_ITEMS[i].needsYears) { g_yearSel = 0; g_state = State::YEAR_SELECT; }
                     else { runQuery(analytics, g_feature); g_state = State::RESULT; }
