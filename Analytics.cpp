@@ -217,54 +217,53 @@ QueryResult Analytics::volatilityIQR(int startYear, int endYear) const {
     return res;
 }
 
-// ─── Feature 4: Days with drop > 4%  (2005–2010) ─────────────────────────────
+// ─── Feature 4: Days with drop > threshold%  in a year range ─────────────────
 
-QueryResult Analytics::drops2005to2010() const {
+QueryResult Analytics::drops(int startYear, int endYear, double threshold) const {
     QueryResult res;
-    res.title = "Days with Drop > 4%  [2005 – 2010]";
+    res.title = "Days with Drop > " + fmt(threshold, 1) + "%  ["
+                + to_string(startYear) + " \xe2\x80\x93 " + to_string(endYear) + "]";
     if (!pst_pct)
         return makeError(res.title, "PST not built");
 
     int L, R;
-    if (!getWindow(2005, 2010, L, R))
-        return makeError(res.title, "No data for 2005–2010");
+    if (!getWindow(startYear, endYear, L, R))
+        return makeError(res.title, "No data in range");
 
-    int n   = R - L + 1;
-    int vL  = L;
-    int vR  = R + 1;
+    int n  = R - L + 1;
+    int vL = L;
+    int vR = R + 1;
 
-    // Threshold: pct_change <= -4.0 means drop of at least 4%
-    // We use get_compressed_less_equal(-4.0) to count values <= -4%
-    // "drop by MORE than 4%" → pct_change < -4.0
-    // Use threshold slightly below -4.0 for strict inequality
+    // "drop by MORE than threshold%" → pct_change < -threshold
+    // Strict inequality: compress (-threshold - eps)
     auto t0 = high_resolution_clock::now();
 
-    int threshold_c = comp_pct.get_compressed_less_equal(-4.0 - 1e-9);
+    int threshold_c = comp_pct.get_compressed_less_equal(-threshold - 1e-9);
     int count = 0;
-    if (threshold_c >= 0) {
+    if (threshold_c >= 0)
         count = pst_pct->query_count_less_equal(vL, vR, threshold_c);
-    }
 
     auto t1 = high_resolution_clock::now();
     res.query_ms = duration<double, milli>(t1 - t0).count();
 
-    // Also find the worst among those for context
-    double worst_pct = 0.0;
+    // Find the worst drop in the window for context (linear scan over matched days only)
+    double worst_pct  = 0.0;
     string worst_date = "N/A";
     for (int i = L; i <= R; i++) {
-        if (days[i].pct_change < -4.0 && days[i].pct_change < worst_pct) {
-            worst_pct = days[i].pct_change;
+        if (days[i].pct_change < -threshold && days[i].pct_change < worst_pct) {
+            worst_pct  = days[i].pct_change;
             worst_date = days[i].date_str;
         }
     }
 
     res.fields = {
-        {"Period",            "2005 – 2010"},
-        {"Total Trading Days",to_string(n)},
-        {"Days with Drop > 4%", to_string(count)},
-        {"Frequency",         fmtPct(100.0 * count / n)},
-        {"Worst Single Day",  worst_date + "  (" + fmtPct(worst_pct) + ")"},
-        {"PST Method",        "O(log N) count query"},
+        {"Period",                         to_string(startYear) + " \xe2\x80\x93 " + to_string(endYear)},
+        {"Threshold",                      "Drop > " + fmt(threshold, 1) + "%"},
+        {"Total Trading Days",             to_string(n)},
+        {"Days Exceeding Threshold",       to_string(count)},
+        {"Frequency",                      fmtPct(100.0 * count / n)},
+        {"Worst Single Day",               worst_date + "  (" + fmtPct(worst_pct) + ")"},
+        {"PST Method",                     "O(log N) count query"},
     };
     return res;
 }

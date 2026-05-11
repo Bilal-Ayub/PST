@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>KSE-100 PST Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg:     #0d1117;
+    --bg2:    #161b22;
+    --bg3:    #21262d;
+    --border: #30363d;
+    --text:   #e6edf3;
+    --muted:  #7d8590;
+    --green:  #3fb950;
+    --red:    #f85149;
+    --amber:  #d29922;
+    --blue:   #58a6ff;
+    --cyan:   #39d353;
+    --accent: #1f6feb;
+    --radius: 8px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--text);
+    height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+  }
+
+  /* topbar */
+  .topbar {
+    background: var(--bg2); border-bottom: 1px solid var(--border);
+    padding: 0 20px; height: 52px;
+    display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+  }
+  .topbar-left { display: flex; align-items: center; gap: 12px; }
+  .logo {
+    width: 30px; height: 30px; background: var(--accent); border-radius: 7px;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 11px; color: #fff;
+  }
+  .topbar-title { font-weight: 600; font-size: 14px; }
+  .topbar-sub   { font-size: 11px; color: var(--muted); }
+  .status-dot   { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .status-dot.on { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  #status-text  { font-size: 12px; color: var(--muted); }
+  #info-badge   { font-size: 11px; color: var(--muted); padding: 3px 10px; border: 1px solid var(--border); border-radius: 20px; }
+  .spinner {
+    width: 16px; height: 16px; border: 2px solid var(--border);
+    border-top-color: var(--blue); border-radius: 50%;
+    animation: spin .6s linear infinite; display: none;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  body.loading .spinner { display: block; }
+
+  /* layout */
+  .body { display: flex; flex: 1; overflow: hidden; }
+
+  /* sidebar */
+  .sidebar {
+    width: 220px; background: var(--bg2); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; flex-shrink: 0; overflow-y: auto;
+  }
+  .sb-section {
+    font-size: 10px; font-weight: 600; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--muted); padding: 16px 14px 6px;
+  }
+  .nav-item {
+    display: flex; align-items: center; gap: 9px; padding: 8px 14px;
+    font-size: 12px; color: var(--muted); cursor: pointer;
+    border-left: 2px solid transparent;
+    transition: background .1s, color .1s, border-color .1s; user-select: none;
+  }
+  .nav-item:hover { background: var(--bg3); color: var(--text); }
+  .nav-item.active { background: var(--bg3); color: var(--text); border-left-color: var(--accent); font-weight: 500; }
+  .nav-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .nav-tag { margin-left: auto; font-size: 9px; padding: 1px 5px; border-radius: 4px; background: #1f3a5f; color: var(--blue); font-weight: 700; }
+  .nav-hint { font-size: 10px; color: var(--muted); padding: 0 14px 8px 34px; }
+
+  /* main column */
+  .main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+
+  /* year bar — lives ABOVE content, never re-rendered on result update */
+  .year-bar {
+    background: var(--bg2); border-bottom: 1px solid var(--border);
+    padding: 10px 20px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; flex-shrink: 0;
+  }
+  .year-bar label { font-size: 11px; color: var(--muted); }
+  .year-bar select {
+    background: var(--bg3); border: 1px solid var(--border);
+    color: var(--text); border-radius: 6px; padding: 4px 8px; font-size: 12px;
+  }
+  .run-btn {
+    background: var(--accent); border: none; color: #fff;
+    border-radius: 6px; padding: 5px 16px; font-size: 12px;
+    cursor: pointer; font-weight: 500; transition: opacity .15s;
+  }
+  .run-btn:hover { opacity: .85; }
+  .preset-row { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+  .preset-btn {
+    background: var(--bg3); border: 1px solid var(--border);
+    color: var(--muted); border-radius: 6px; padding: 4px 10px;
+    font-size: 11px; cursor: pointer; transition: all .15s;
+  }
+  .preset-btn:hover { border-color: var(--accent); color: var(--text); }
+  .preset-btn.active { border-color: var(--accent); color: var(--text); background: #1f3a5f; }
+
+  /* scrollable content */
+  .content { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+
+  /* cards */
+  .card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 20px; }
+  .card-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 14px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .pst-badge { font-size: 9px; padding: 2px 6px; border-radius: 4px; background: #1f3a5f; color: var(--blue); font-weight: 700; }
+  .timing { font-size: 10px; color: var(--muted); margin-left: auto; }
+
+  /* stat grid */
+  .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .stat-card { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+  .stat-label { font-size: 10px; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: .04em; }
+  .stat-val   { font-size: 22px; font-weight: 700; line-height: 1.2; }
+  .stat-sub   { font-size: 11px; color: var(--muted); margin-top: 5px; }
+
+  /* field table */
+  .ft { width: 100%; border-collapse: collapse; }
+  .ft tr { border-bottom: 1px solid var(--border); }
+  .ft tr:last-child { border-bottom: none; }
+  .ft td { padding: 7px 0; font-size: 12px; }
+  .ft td:first-child { color: var(--muted); width: 200px; }
+  .ft td:last-child  { font-weight: 500; }
+
+  /* value colours */
+  .g { color: var(--green) !important; }
+  .r { color: var(--red)   !important; }
+  .b { color: var(--blue)  !important; }
+  .a { color: var(--amber) !important; }
+
+  /* layout helpers */
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .ov-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .ov-grid .full { grid-column: 1 / -1; }
+  .chart-wrap { position: relative; height: 240px; }
+
+  /* progress bar */
+  .prog-bg   { background: var(--bg3); border-radius: 4px; height: 6px; flex: 1; overflow: hidden; }
+  .prog-fill { height: 100%; border-radius: 4px; }
+
+  /* error */
+  .err { background: #2d1117; border: 1px solid var(--red); color: var(--red); border-radius: var(--radius); padding: 12px 16px; font-size: 12px; }
+
+  @media (max-width: 860px) {
+    .sidebar { width: 44px; }
+    .nav-item span, .nav-hint, .sb-section, .nav-tag { display: none; }
+    .stat-grid, .two-col, .ov-grid { grid-template-columns: 1fr 1fr; }
+    .ov-grid .full { grid-column: unset; }
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-left">
+    <div class="logo">KSE</div>
+    <div>
+      <div class="topbar-title">KSE-100 Analytics Dashboard</div>
+      <div class="topbar-sub">Persistent Segment Tree · 20-Year Dataset</div>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:12px">
+    <div class="spinner" id="spinner"></div>
+    <div class="status-dot" id="sdot"></div>
+    <span id="status-text">Connecting…</span>
+    <span id="info-badge">—</span>
+  </div>
+</div>
+
+<div class="body">
+  <nav class="sidebar">
+    <div class="sb-section">Overview</div>
+    <div class="nav-item active" data-f="overview">
+      <span class="nav-dot" style="background:var(--accent)"></span>
+      <span>Overview</span>
+    </div>
+
+    <div class="sb-section">Single-Day</div>
+    <div class="nav-item" data-f="crash">
+      <span class="nav-dot" style="background:var(--red)"></span><span>Max Crash</span>
+    </div>
+    <div class="nav-hint">Worst trading day ever</div>
+    <div class="nav-item" data-f="rally">
+      <span class="nav-dot" style="background:var(--green)"></span><span>Max Rally</span>
+    </div>
+    <div class="nav-hint">Best trading day ever</div>
+    <div class="nav-item" data-f="drops" data-needs-years="1">
+      <span class="nav-dot" style="background:var(--amber)"></span><span>Drop Threshold</span><span class="nav-tag">PST</span>
+    </div>
+    <div class="nav-hint">Count days beyond a drop %</div>
+
+    <div class="sb-section">Range Queries</div>
+    <div class="nav-item" data-f="iqr" data-needs-years="1">
+      <span class="nav-dot" style="background:var(--cyan)"></span><span>Volatility IQR</span><span class="nav-tag">PST</span>
+    </div>
+    <div class="nav-hint">IQR of close prices</div>
+    <div class="nav-item" data-f="sentiment" data-needs-years="1">
+      <span class="nav-dot" style="background:var(--blue)"></span><span>Market Sentiment</span><span class="nav-tag">PST</span>
+    </div>
+    <div class="nav-hint">Bull vs bear ratio</div>
+    <div class="nav-item" data-f="drawdown" data-needs-years="1">
+      <span class="nav-dot" style="background:var(--red)"></span><span>Max Drawdown</span>
+    </div>
+    <div class="nav-hint">Peak-to-trough loss</div>
+    <div class="nav-item" data-f="streak" data-needs-years="1">
+      <span class="nav-dot" style="background:var(--green)"></span><span>Streak Finder</span>
+    </div>
+    <div class="nav-hint">Longest green / red run</div>
+
+    <div class="sb-section">Full Period</div>
+    <div class="nav-item" data-f="percentile">
+      <span class="nav-dot" style="background:var(--amber)"></span><span>Percentile Rank</span><span class="nav-tag">PST</span>
+    </div>
+    <div class="nav-hint">Where does today rank?</div>
+    <div class="nav-item" data-f="volatility">
+      <span class="nav-dot" style="background:var(--cyan)"></span><span>Volatility Clustering</span><span class="nav-tag">PST</span>
+    </div>
+    <div class="nav-hint">Volatile days per year</div>
+  </nav>
+
+  <!-- main: year-bar slot + scrollable content -->
+  <div class="main">
+    <div id="yb-slot"></div>
+    <div class="content" id="content">
+      <div style="padding:40px;text-align:center;color:var(--muted);font-size:13px">
+        Connecting to server…
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = 'http://localhost:8080';
+const RANGES = [
+  { label:'Full (2004–2024)',   sy:2004, ey:2024 },
+  { label:'Pre-Crisis (04–07)', sy:2004, ey:2007 },
+  { label:'Crisis (08–12)',     sy:2008, ey:2012 },
+  { label:'Bull Run (13–17)',   sy:2013, ey:2017 },
+  { label:'Recent (18–24)',     sy:2018, ey:2024 },
+];
+const NEEDS_YEARS = new Set(['iqr','sentiment','drawdown','streak','drops']);
+
+let curFeature = 'overview';
+let curSy = 2004, curEy = 2024, curThresh = 4.0;
+let charts = [];   // all active Chart instances
+let serverReady = false;
+
+// ── utils ─────────────────────────────────────────────────────────────────────
+function setLoading(on) { document.body.classList.toggle('loading', on); }
+
+async function apiFetch(ep, params) {
+  const url = new URL(API + '/api/' + ep);
+  if (params) Object.entries(params).forEach(([k,v]) => url.searchParams.set(k,v));
+  const r = await fetch(url);
+  return r.json();
+}
+
+function killCharts() {
+  charts.forEach(c => { try { c.destroy(); } catch(e){} });
+  charts = [];
+}
+
+function mkChart(id, cfg) {
+  const c = new Chart(document.getElementById(id), cfg);
+  charts.push(c);
+  return c;
+}
+
+function valCls(key, val) {
+  const k = key.toLowerCase(), v = String(val);
+  if (k.includes('change')||k.includes('return')||k.includes('gain')||k.includes('loss'))
+    return v.startsWith('-') ? 'r' : v.startsWith('+') ? 'g' : '';
+  if (k.includes('positive')||k.includes('green')||k.includes('rally')) return 'g';
+  if (k.includes('negative')||k.includes('red')||k.includes('crash')||k.includes('drawdown')||k.includes('drop')||k.includes('worst')) return 'r';
+  if (k.includes('iqr')||k.includes('method')||k.includes('pst')||k.includes('algorithm')) return 'b';
+  if (k.includes('median')||k.includes('percentile')||k.includes('rank')||k.includes('ratio')) return 'a';
+  return '';
+}
+
+function ft(fields) {
+  return `<table class="ft">${(fields||[]).map(({key,value}) =>
+    `<tr><td>${key}</td><td class="${valCls(key,value)}">${value}</td></tr>`
+  ).join('')}</table>`;
+}
+
+function setContent(html) {
+  killCharts();
+  document.getElementById('content').innerHTML = html;
+}
+
+// ── connection ─────────────────────────────────────────────────────────────────
+async function checkConnection() {
+  try {
+    const d = await apiFetch('info');
+    document.getElementById('sdot').classList.add('on');
+    document.getElementById('status-text').textContent = 'Connected';
+    document.getElementById('info-badge').textContent =
+      `${d.total_days.toLocaleString()} days · ${d.min_year}–${d.max_year}`;
+    if (!serverReady) { serverReady = true; loadOverview(); }
+  } catch {
+    document.getElementById('status-text').textContent = 'Server offline — run kse_dashboard.exe first';
+    setTimeout(checkConnection, 2500);
+  }
+}
+
+// ── nav ───────────────────────────────────────────────────────────────────────
+document.querySelectorAll('.nav-item[data-f]').forEach(el => {
+  el.addEventListener('click', () => {
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    el.classList.add('active');
+    curFeature = el.dataset.f;
+    curSy = 2004; curEy = 2024;
+    if (curFeature === 'drops') { curSy = 2005; curEy = 2010; curThresh = 4.0; }
+    curFeature === 'overview' ? loadOverview() : loadFeature(curFeature, curSy, curEy);
+  });
+});
+
+// ── year bar ──────────────────────────────────────────────────────────────────
+// The year bar lives in #yb-slot and is NEVER part of the result HTML.
+// So changing the dropdowns and clicking Run doesn't wipe the selects.
+function buildYearBar(feature, sy, ey) {
+  const slot = document.getElementById('yb-slot');
+  if (!NEEDS_YEARS.has(feature)) { slot.innerHTML = ''; return; }
+
+  let osy = '', oey = '';
+  for (let y = 2004; y <= 2024; y++) {
+    osy += `<option value="${y}"${y===sy?' selected':''}>${y}</option>`;
+    oey += `<option value="${y}"${y===ey?' selected':''}>${y}</option>`;
+  }
+  const presets = RANGES.map((r,i) =>
+    `<button class="preset-btn${r.sy===sy&&r.ey===ey?' active':''}" onclick="applyPreset(${i})">${r.label}</button>`
+  ).join('');
+
+  slot.innerHTML = `<div class="year-bar">
+    <label>From</label>
+    <select id="sel-sy" onchange="guardRange()">${osy}</select>
+    <label>To</label>
+    <select id="sel-ey" onchange="guardRange()">${oey}</select>
+    ${feature === 'drops' ? `<label>Drop &gt;</label>
+    <input id="sel-thresh" type="number" min="0.1" max="20" step="0.5" value="${curThresh}"
+      style="width:64px;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 8px;font-size:12px">
+    <span style="font-size:11px;color:var(--muted)">%</span>` : ''}
+    <button class="run-btn" onclick="runWithYears()">Run</button>
+    <div class="preset-row">${presets}</div>
+  </div>`;
+}
+
+function guardRange() {
+  const sy = +document.getElementById('sel-sy').value;
+  const ey = +document.getElementById('sel-ey').value;
+  if (ey < sy) document.getElementById('sel-ey').value = sy;
+}
+
+function runWithYears() {
+  curSy = +document.getElementById('sel-sy').value;
+  curEy = +document.getElementById('sel-ey').value;
+  if (curEy < curSy) curEy = curSy;
+  const tEl = document.getElementById('sel-thresh');
+  if (tEl) curThresh = Math.max(0.1, parseFloat(tEl.value) || 4.0);
+  // Rebuild bar to update preset highlights, then load
+  buildYearBar(curFeature, curSy, curEy);
+  loadFeature(curFeature, curSy, curEy);
+}
+
+function applyPreset(i) {
+  curSy = RANGES[i].sy;
+  curEy = RANGES[i].ey;
+  buildYearBar(curFeature, curSy, curEy);
+  loadFeature(curFeature, curSy, curEy);
+}
+
+// ── OVERVIEW ──────────────────────────────────────────────────────────────────
+async function loadOverview() {
+  document.getElementById('yb-slot').innerHTML = '';
+  setContent('<div style="padding:30px;color:var(--muted);font-size:13px">Loading overview…</div>');
+  setLoading(true);
+  try {
+    const [crash, rally, sent, vol, dd] = await Promise.all([
+      apiFetch('crash'),
+      apiFetch('rally'),
+      apiFetch('sentiment', {start:2004,end:2024}),
+      apiFetch('volatility'),
+      apiFetch('drawdown',  {start:2004,end:2024}),
+    ]);
+    setLoading(false);
+    renderOverview(crash, rally, sent, vol, dd);
+  } catch {
+    setLoading(false);
+    setContent('<div class="err">Failed to load overview. Is the server running?</div>');
+  }
+}
+
+function renderOverview(crash, rally, sent, vol, dd) {
+  const fv = (data, key) => ((data.fields||[]).find(f=>f.key===key)||{}).value || '—';
+  const sf = Object.fromEntries((sent.fields||[]).map(x=>[x.key,x.value]));
+  const pos = parseInt(sf['Positive Days'])||0;
+  const neg = parseInt(sf['Negative Days'])||0;
+  const flt = parseInt(sf['Flat Days'])||0;
+  const tot = pos+neg+flt||1;
+
+  const vLabels = (vol.chart_rows||[]).map(r=>r.label);
+  const vCounts = (vol.chart_rows||[]).map(r=>r.count);
+  const vColors = (vol.chart_rows||[]).map(r=>r.highlight?'#f85149cc':'#58a6ff88');
+
+  setContent(`
+  <div class="stat-grid">
+    <div class="stat-card">
+      <div class="stat-label">Worst Single Day</div>
+      <div class="stat-val r">${fv(crash,'Change (%)')}</div>
+      <div class="stat-sub">${fv(crash,'Date')}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Best Single Day</div>
+      <div class="stat-val g">${fv(rally,'Change (%)')}</div>
+      <div class="stat-sub">${fv(rally,'Date')}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Max Drawdown (All-Time)</div>
+      <div class="stat-val r">${fv(dd,'Max Drawdown')}</div>
+      <div class="stat-sub">${fv(dd,'Peak Date')} → ${fv(dd,'Trough Date')}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Bull / Bear Ratio (All-Time)</div>
+      <div class="stat-val a">${sf['Bull/Bear Ratio']||'—'}</div>
+      <div class="stat-sub">Avg daily return: ${sf['Avg Daily Return']||'—'}</div>
+    </div>
+  </div>
+
+  <div class="ov-grid">
+
+    <div class="card">
+      <div class="card-title">Market Sentiment — Full Period <span class="pst-badge">PST</span></div>
+      <div style="display:flex;gap:20px;align-items:center">
+        <div style="width:150px;height:150px;flex-shrink:0"><canvas id="ov-donut"></canvas></div>
+        <div style="flex:1;display:flex;flex-direction:column;gap:10px">
+          <div>
+            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+              <span style="color:var(--green)">● Positive</span>
+              <span class="g" style="font-weight:600">${pos.toLocaleString()} &nbsp;(${(pos/tot*100).toFixed(1)}%)</span>
+            </div>
+            <div class="prog-bg"><div class="prog-fill" style="width:${(pos/tot*100).toFixed(1)}%;background:var(--green)"></div></div>
+          </div>
+          <div>
+            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+              <span style="color:var(--red)">● Negative</span>
+              <span class="r" style="font-weight:600">${neg.toLocaleString()} &nbsp;(${(neg/tot*100).toFixed(1)}%)</span>
+            </div>
+            <div class="prog-bg"><div class="prog-fill" style="width:${(neg/tot*100).toFixed(1)}%;background:var(--red)"></div></div>
+          </div>
+          <div>
+            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+              <span style="color:var(--muted)">● Flat</span>
+              <span style="font-weight:600">${flt.toLocaleString()} &nbsp;(${(flt/tot*100).toFixed(1)}%)</span>
+            </div>
+            <div class="prog-bg"><div class="prog-fill" style="width:${(flt/tot*100).toFixed(1)}%;background:var(--muted)"></div></div>
+          </div>
+          <div style="font-size:11px;color:var(--muted);margin-top:4px">
+            Total: <strong style="color:var(--text)">${tot.toLocaleString()}</strong> trading days
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Max Drawdown — Full Period</div>
+      ${ft(dd.fields)}
+      <div style="margin-top:10px;font-size:10px;color:var(--muted)">Query: ${(dd.query_ms||0).toFixed(3)} ms</div>
+    </div>
+
+    <div class="card full">
+      <div class="card-title">
+        Volatility Clustering — Days |Move| &gt; 2% per Year
+        <span class="pst-badge">PST</span>
+        <span class="timing">Query: ${(vol.query_ms||0).toFixed(3)} ms</span>
+      </div>
+      <div class="chart-wrap"><canvas id="ov-bar"></canvas></div>
+      <div style="margin-top:10px;font-size:11px;color:var(--muted)">
+        <span style="color:var(--red)">■</span> Red = years &gt;1.5× average volatility &nbsp;·&nbsp;
+        <span style="color:var(--blue)">■</span> Blue = calm years
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title r">Worst Single Day</div>
+      ${ft(crash.fields)}
+      <div style="margin-top:10px;font-size:10px;color:var(--muted)">Query: ${(crash.query_ms||0).toFixed(3)} ms</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title g">Best Single Day</div>
+      ${ft(rally.fields)}
+      <div style="margin-top:10px;font-size:10px;color:var(--muted)">Query: ${(rally.query_ms||0).toFixed(3)} ms</div>
+    </div>
+
+  </div>`);
+
+  mkChart('ov-donut', {
+    type: 'doughnut',
+    data: { labels:['Positive','Negative','Flat'],
+            datasets:[{data:[pos,neg,flt],backgroundColor:['#3fb950','#f85149','#7d8590'],borderWidth:0}] },
+    options: { plugins:{ legend:{ display:false } }, cutout:'70%' }
+  });
+
+  mkChart('ov-bar', {
+    type: 'bar',
+    data: { labels:vLabels, datasets:[{
+      label:'Volatile days', data:vCounts, backgroundColor:vColors,
+      borderRadius:4, borderSkipped:false
+    }]},
+    options: {
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false} },
+      scales:{
+        x:{ ticks:{color:'#7d8590',font:{size:10}}, grid:{color:'#21262d'} },
+        y:{ ticks:{color:'#7d8590',font:{size:10}}, grid:{color:'#21262d'} }
+      }
+    }
+  });
+}
+
+// ── FEATURE pages ─────────────────────────────────────────────────────────────
+async function loadFeature(feature, sy, ey) {
+  buildYearBar(feature, sy, ey);
+  setContent('<div style="padding:30px;color:var(--muted);font-size:13px">Running query…</div>');
+  setLoading(true);
+  try {
+    const params = NEEDS_YEARS.has(feature) ? {start:sy, end:ey} : {};
+    if (feature === 'drops') params.thresh = curThresh;
+    const data = await apiFetch(feature, params);
+    setLoading(false);
+    renderFeature(feature, data);
+  } catch {
+    setLoading(false);
+    setContent('<div class="err">Server error.</div>');
+  }
+}
+
+function renderFeature(feature, data) {
+  if (!data.ok) { setContent(`<div class="err">Error: ${data.error}</div>`); return; }
+
+  // ── sentiment ─────────────────────────────────────────────────────────────
+  if (feature === 'sentiment') {
+    const sf = Object.fromEntries((data.fields||[]).map(x=>[x.key,x.value]));
+    const pos = parseInt(sf['Positive Days'])||0;
+    const neg = parseInt(sf['Negative Days'])||0;
+    const flt = parseInt(sf['Flat Days'])||0;
+    const tot = pos+neg+flt||1;
+
+    setContent(`
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-label">Positive Days</div>
+          <div class="stat-val g">${pos.toLocaleString()}</div>
+          <div class="stat-sub">${(pos/tot*100).toFixed(1)}%</div></div>
+        <div class="stat-card"><div class="stat-label">Negative Days</div>
+          <div class="stat-val r">${neg.toLocaleString()}</div>
+          <div class="stat-sub">${(neg/tot*100).toFixed(1)}%</div></div>
+        <div class="stat-card"><div class="stat-label">Flat Days</div>
+          <div class="stat-val">${flt.toLocaleString()}</div>
+          <div class="stat-sub">${(flt/tot*100).toFixed(1)}%</div></div>
+        <div class="stat-card"><div class="stat-label">Bull / Bear</div>
+          <div class="stat-val a">${sf['Bull/Bear Ratio']||'—'}</div>
+          <div class="stat-sub">${sf['Avg Daily Return']||'—'} avg/day</div></div>
+      </div>
+      <div class="card">
+        <div class="card-title">${data.title} <span class="pst-badge">PST</span>
+          <span class="timing">Query: ${data.query_ms.toFixed(3)} ms</span></div>
+        <div style="display:flex;gap:28px;align-items:center">
+          <div style="width:170px;height:170px;flex-shrink:0"><canvas id="feat-donut"></canvas></div>
+          ${ft(data.fields)}
+        </div>
+      </div>`);
+
+    mkChart('feat-donut', {
+      type:'doughnut',
+      data:{ labels:['Positive','Negative','Flat'],
+             datasets:[{data:[pos,neg,flt],backgroundColor:['#3fb950','#f85149','#7d8590'],borderWidth:0}] },
+      options:{ plugins:{ legend:{ labels:{ color:'#e6edf3',font:{size:11} } } }, cutout:'68%' }
+    });
+    return;
+  }
+
+  // ── volatility clustering ─────────────────────────────────────────────────
+  if (feature === 'volatility' && data.is_chart) {
+    const labels = data.chart_rows.map(r=>r.label);
+    const counts = data.chart_rows.map(r=>r.count);
+    const colors = data.chart_rows.map(r=>r.highlight?'#f85149cc':'#58a6ff88');
+    const pcts   = data.chart_rows.map(r=>r.pct.toFixed(1)+'%');
+
+    setContent(`
+      <div class="card">
+        <div class="card-title">${data.title} <span class="pst-badge">PST</span>
+          <span class="timing">Query: ${data.query_ms.toFixed(3)} ms</span></div>
+        <div class="chart-wrap"><canvas id="feat-bar"></canvas></div>
+        <div style="margin-top:10px;font-size:11px;color:var(--muted)">
+          <span style="color:var(--red)">■</span> Red = &gt;1.5× average volatility
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Summary</div>${ft(data.fields)}
+      </div>
+      <div class="card">
+        <div class="card-title">Per-Year Breakdown</div>
+        <table class="ft">
+          <tr><td style="color:var(--muted);font-weight:600">Year</td>
+              <td style="color:var(--muted);font-weight:600">Volatile Days</td>
+              <td style="color:var(--muted);font-weight:600">% of Year</td></tr>
+          ${data.chart_rows.map(r=>`
+            <tr>
+              <td>${r.label}</td>
+              <td class="${r.highlight?'r':''}">${r.count} / ${r.total}</td>
+              <td class="${r.highlight?'r':''}">${r.pct.toFixed(1)}%</td>
+            </tr>`).join('')}
+        </table>
+      </div>`);
+
+    mkChart('feat-bar', {
+      type:'bar',
+      data:{ labels, datasets:[{
+        label:'Volatile days', data:counts,
+        backgroundColor:colors, borderRadius:4, borderSkipped:false
+      }]},
+      options:{
+        responsive:true, maintainAspectRatio:false,
+        plugins:{ legend:{display:false}, tooltip:{
+          callbacks:{ label: ctx=>`${ctx.parsed.y} days (${pcts[ctx.dataIndex]})` }
+        }},
+        scales:{
+          x:{ ticks:{color:'#7d8590',font:{size:10}}, grid:{color:'#21262d'} },
+          y:{ ticks:{color:'#7d8590',font:{size:10}}, grid:{color:'#21262d'} }
+        }
+      }
+    });
+    return;
+  }
+
+  // ── streak ────────────────────────────────────────────────────────────────
+  if (feature === 'streak') {
+    const fields = data.fields||[];
+    const period = fields.find(f=>f.key==='Period');
+    const redIdx = fields.findIndex(f=>f.key==='Best Red Streak');
+    const gF = fields.filter((f,i)=> i>0 && i<redIdx);
+    const rF = fields.filter((f,i)=> i>=redIdx && f.key!=='Algorithm');
+    const algo = fields.find(f=>f.key==='Algorithm');
+
+    setContent(`
+      <div class="card">
+        <div class="card-title">${data.title}
+          <span class="timing">Query: ${data.query_ms.toFixed(3)} ms</span></div>
+        ${period?`<div style="font-size:11px;color:var(--muted);margin-bottom:14px">Period: ${period.value}</div>`:''}
+        <div class="two-col">
+          <div>
+            <div style="font-size:12px;font-weight:600;color:var(--green);margin-bottom:10px">🟢 Best Bull Streak</div>
+            ${ft(gF)}
+          </div>
+          <div>
+            <div style="font-size:12px;font-weight:600;color:var(--red);margin-bottom:10px">🔴 Best Bear Streak</div>
+            ${ft(rF)}
+          </div>
+        </div>
+        ${algo?`<div style="margin-top:12px;font-size:11px;color:var(--muted)">${algo.key}: ${algo.value}</div>`:''}
+      </div>`);
+    return;
+  }
+
+  // ── drops ─────────────────────────────────────────────────────────────────
+  if (feature === 'drops') {
+    const fv = key => ((data.fields||[]).find(f=>f.key===key)||{}).value || '—';
+    const count = parseInt(fv('Days Exceeding Threshold')) || 0;
+    const total = parseInt(fv('Total Trading Days')) || 1;
+    const freq  = fv('Frequency');
+    const worst = fv('Worst Single Day');
+    const thresh = fv('Threshold');
+    setContent(`
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="stat-label">Days Exceeding Threshold</div>
+          <div class="stat-val r">${count.toLocaleString()}</div>
+          <div class="stat-sub">out of ${total.toLocaleString()} trading days</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Frequency</div>
+          <div class="stat-val a">${freq}</div>
+          <div class="stat-sub">of all days in period</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Threshold Applied</div>
+          <div class="stat-val b">${thresh}</div>
+          <div class="stat-sub">single-day decline</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Worst Single Day</div>
+          <div class="stat-val r" style="font-size:14px">${worst}</div>
+          <div class="stat-sub">largest crash in period</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">${data.title} <span class="pst-badge">PST</span>
+          <span class="timing">Query: ${data.query_ms.toFixed(3)} ms</span></div>
+        ${ft(data.fields)}
+      </div>`);
+    return;
+  }
+
+  // ── default ───────────────────────────────────────────────────────────────
+  const hasPst = (data.fields||[]).some(f=>f.value&&f.value.includes('log N'));
+  setContent(`
+    <div class="card">
+      <div class="card-title">${data.title}
+        ${hasPst?'<span class="pst-badge">PST</span>':''}
+        <span class="timing">Query: ${data.query_ms.toFixed(3)} ms</span>
+      </div>
+      ${ft(data.fields)}
+    </div>`);
+}
+
+checkConnection();
+</script>
+</body>
+</html>

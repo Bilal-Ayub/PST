@@ -42,8 +42,8 @@ public:
     // Feature 3: Volatility Spread (IQR of close prices) for a year range
     QueryResult volatilityIQR(int startYear, int endYear) const;
 
-    // Feature 4: Days with drop > 4% between 2005 and 2010 (hardcoded per spec)
-    QueryResult drops2005to2010() const;
+    // Feature 4: Days with drop > threshold% in a year range
+    QueryResult drops(int startYear, int endYear, double threshold = 4.0) const;
 
     // Feature 5: % positive vs negative days in a year range
     QueryResult sentiment(int startYear, int endYear) const;
