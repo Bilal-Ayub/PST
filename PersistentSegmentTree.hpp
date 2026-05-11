@@ -22,6 +22,7 @@ private:
     // Helper functions for tree traversal
     int build(int tl, int tr);
     int insert(int prev_root, int tl, int tr, int val);
+    int remove(int prev_root, int tl, int tr, int val);
     
     // Internal query helpers
     int query_kth(int root_prev, int root_curr, int tl, int tr, int k) const;
@@ -38,6 +39,10 @@ public:
     // Inserts a compressed value and creates a new version
     // Returns the index of the new root
     int insert(int val);
+
+    // Deletes (decrements) a compressed value and creates a new version
+    // Returns the index of the new root, or -1 if the value has no occurrences
+    int remove(int val);
 
     // Get the total number of versions stored (ignoring initial base tree)
     int num_versions() const;
